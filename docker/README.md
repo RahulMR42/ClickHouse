@@ -33,7 +33,7 @@ podman machine list
 Build the current local checkout:
 
 ```bash
-cd /Users/rahulmr/LocalMaster/GENAI/my_genai/langfuse_selfhosted/ClickHouse
+cd /<PATH/ClickHouse
 BUILD_JOBS=1 ./docker/podman-build-machine.sh
 ```
 
