@@ -1,0 +1,88 @@
+version: 0.1
+component: build
+timeoutInSeconds: 28800
+shell: bash
+failImmediatelyOnError: true
+
+env:
+  variables:
+    # Keep this literal. OCI DevOps does not allow exported or pipeline variables
+    # in outputArtifacts[*].location for DOCKER_IMAGE artifacts.
+    LOCAL_IMAGE_TAG: "clickhouse-oci-devops:managed-build"
+    BUILD_TYPE: "RelWithDebInfo"
+    BUILD_TARGET: "clickhouse"
+    BUILD_JOBS: "0"
+    ENABLE_TESTS: "OFF"
+    ENABLE_UTILS: "OFF"
+    ENABLE_RUST: "OFF"
+    EXTRA_CMAKE_ARGS: ""
+  exportedVariables:
+    - IMAGE_TAG
+    - GIT_COMMIT_SHORT
+
+steps:
+  - type: Command
+    name: "Compute image tag"
+    command: |
+      set -euo pipefail
+
+      SOURCE_COMMIT_HASH="${OCI_PRIMARY_SOURCE_COMMIT_HASH:-${OCI_TRIGGER_COMMIT_HASH:-manual}}"
+      GIT_COMMIT_SHORT="$(printf '%s' "${SOURCE_COMMIT_HASH}" | cut -c1-12)"
+      IMAGE_TAG="${GIT_COMMIT_SHORT}-$(date -u +%Y%m%d%H%M%S)"
+
+      export GIT_COMMIT_SHORT IMAGE_TAG
+
+      echo "Primary source dir: ${OCI_PRIMARY_SOURCE_DIR}"
+      echo "Commit: ${GIT_COMMIT_SHORT}"
+      echo "Delivered image tag: ${IMAGE_TAG}"
+
+  - type: Command
+    name: "Initialize submodules"
+    command: |
+      set -euo pipefail
+      cd "${OCI_PRIMARY_SOURCE_DIR}"
+
+      git submodule sync --recursive
+      git submodule update --init --recursive --jobs "$(nproc)"
+
+  - type: Command
+    name: "Build ClickHouse image"
+    timeoutInSeconds: 28800
+    command: |
+      set -euo pipefail
+      cd "${OCI_PRIMARY_SOURCE_DIR}"
+
+      if command -v docker >/dev/null 2>&1; then
+        CONTAINER_ENGINE="docker"
+      elif command -v podman >/dev/null 2>&1; then
+        CONTAINER_ENGINE="podman"
+      else
+        echo "Neither docker nor podman is available on this build runner." >&2
+        exit 1
+      fi
+
+      BUILD_TIMESTAMP="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+      "${CONTAINER_ENGINE}" build \
+        --file Dockerfile \
+        --tag "${LOCAL_IMAGE_TAG}" \
+        --build-arg BUILD_TYPE="${BUILD_TYPE}" \
+        --build-arg BUILD_TARGET="${BUILD_TARGET}" \
+        --build-arg BUILD_JOBS="${BUILD_JOBS}" \
+        --build-arg ENABLE_TESTS="${ENABLE_TESTS}" \
+        --build-arg ENABLE_UTILS="${ENABLE_UTILS}" \
+        --build-arg ENABLE_RUST="${ENABLE_RUST}" \
+        --build-arg EXTRA_CMAKE_ARGS="${EXTRA_CMAKE_ARGS}" \
+        --build-arg IMAGE_SOURCE="${OCI_PRIMARY_SOURCE_URL:-${OCI_TRIGGER_SOURCE_URL:-}}" \
+        --build-arg IMAGE_REVISION="${OCI_PRIMARY_SOURCE_COMMIT_HASH:-${OCI_TRIGGER_COMMIT_HASH:-}}" \
+        --build-arg IMAGE_CREATED="${BUILD_TIMESTAMP}" \
+        "${OCI_PRIMARY_SOURCE_DIR}"
+
+      "${CONTAINER_ENGINE}" image inspect "${LOCAL_IMAGE_TAG}" >/dev/null
+
+outputArtifacts:
+  - name: clickhouse_image
+    type: DOCKER_IMAGE
+    # Deliver this artifact to OCIR with a parameterized DevOps artifact path such as:
+    # <region>.ocir.io/<namespace>/<repo>:${IMAGE_TAG}
+    location: clickhouse-oci-devops:managed-build
