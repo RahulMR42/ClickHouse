@@ -79,8 +79,9 @@ if (OS_LINUX AND NOT USE_MUSL)
     set (STRERROR_R_CHAR_P 1)
 endif ()
 
-# generate a config.h file
-configure_file("${CMAKE_CURRENT_SOURCE_DIR}/build/cmake/config.h.in" "${CMAKE_CURRENT_BINARY_DIR}/thrift/config.h")
+# Keep a local copy of the template so container builds do not depend on
+# Podman correctly transferring nested vendored submodule paths.
+configure_file("${CMAKE_CURRENT_SOURCE_DIR}/config.h.in" "${CMAKE_CURRENT_BINARY_DIR}/thrift/config.h")
 
 include_directories("${CMAKE_CURRENT_BINARY_DIR}")
 
